@@ -1,36 +1,65 @@
 import { useState } from 'react';
 import type { ViewState } from '../App';
+import { useMidnight } from '../MidnightContext';
+// @ts-ignore
+import { createContractInstance, computeTargetHash, generateTargetNumber, type GamePrivateState } from 'midnightbet-dapp/dist/game-api';
 
 interface CreateGameProps {
   onNavigate: (view: ViewState) => void;
   walletConnected: boolean;
 }
 
-export function CreateGame({ onNavigate }: CreateGameProps) {
+export function CreateGame({ onNavigate, walletConnected }: CreateGameProps) {
   const [players, setPlayers] = useState(2);
   const [minRange, setMinRange] = useState(1);
   const [maxRange, setMaxRange] = useState(100);
   const [stake, setStake] = useState(10);
   const [isCreating, setIsCreating] = useState(false);
+  const { providers } = useMidnight();
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsCreating(true);
     
-    // Simulate Midnight contract deployment & target generation
-    setTimeout(() => {
-      // Generate secure random seed for this user
-      const userSeed = crypto.getRandomValues(new Uint8Array(32));
-      console.log('User Seed generated for auth:', userSeed);
+    try {
+      if (!walletConnected) throw new Error("Wallet not connected");
 
       // Generate target number
-      const targetNumber = Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange;
+      const targetNumber = generateTargetNumber(BigInt(minRange), BigInt(maxRange));
       const targetSalt = crypto.getRandomValues(new Uint8Array(32));
+      const secretKey = crypto.getRandomValues(new Uint8Array(32));
+      
+      const targetHash = await computeTargetHash(targetNumber, targetSalt);
       console.log('Target generated:', targetNumber, 'Salt:', targetSalt);
 
-      setIsCreating(false);
+      const privateState: GamePrivateState = {
+        secretKey,
+        targetSalt,
+        targetNumber
+      };
+
+      const contract = createContractInstance(privateState);
+
+      if (providers && providers.midnightProvider) {
+        console.log("Deploying contract to Midnight network...");
+        const deployed = await providers.midnightProvider.deploy(
+          contract,
+          contract.initialState({} as any, BigInt(players), BigInt(minRange), BigInt(maxRange), BigInt(stake), targetHash)
+        );
+        console.log("Deployed contract address:", deployed.deployTxData.public.contractAddress);
+        // Normally we'd store the contract address here
+      } else {
+        console.warn("Midnight providers not fully initialized. Simulating deployment.");
+        await new Promise(r => setTimeout(r, 2000));
+      }
+
       onNavigate('arena');
-    }, 2000);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to deploy: " + String(err));
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (

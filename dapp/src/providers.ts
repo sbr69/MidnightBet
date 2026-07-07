@@ -9,28 +9,21 @@
  *   - walletAndMidnightProvider → connects to Lace wallet + midnight-js
  */
 
-import type { MidnightProvider, WalletProvider } from '@midnight-ntwrk/midnight-js/providers';
-import type { PrivateStateProvider } from '@midnight-ntwrk/midnight-js/private-state-provider';
-import type { ProofProvider } from '@midnight-ntwrk/midnight-js/proof-provider';
-import type { PublicDataProvider } from '@midnight-ntwrk/midnight-js/public-data-provider';
-import type { ZkConfigProvider } from '@midnight-ntwrk/midnight-js/zk-config-provider';
+// Imports removed because they are not exported exactly like this in 4.1.1
+// We will use `any` for the provider interfaces if needed, or omit them.
 
 // ─── Network Configuration ────────────────────────────────────────────────────
 // For local development with docker-compose, use these defaults.
 // For Midnight Preprod, swap to the preprod endpoints.
 
 export const NETWORK_CONFIG = {
-  // Local (docker-compose) endpoints:
-  indexerUri:    'http://localhost:8088/api/v1/graphql',
-  indexerWsUri:  'ws://localhost:8088/api/v1/graphql',
-  proofServerUri:'http://localhost:6300',
-  nodeUri:       'http://localhost:9944',
+  // Midnight Preprod endpoints:
+  indexerUri:    'https://indexer.testnet-02.midnight.network/api/v1/graphql',
+  indexerWsUri:  'wss://indexer.testnet-02.midnight.network/api/v1/graphql',
+  nodeUri:       'https://rpc.testnet-02.midnight.network',
 
-  // Midnight Preprod endpoints (uncomment to use):
-  // indexerUri:    'https://indexer.testnet-02.midnight.network/api/v1/graphql',
-  // indexerWsUri:  'wss://indexer.testnet-02.midnight.network/api/v1/graphql',
-  // proofServerUri:'https://prover.testnet-02.midnight.network',
-  // nodeUri:       'https://rpc.testnet-02.midnight.network',
+  // Proof server must run locally to access compiled ZK keys:
+  proofServerUri:'http://localhost:6300',
 
   networkId: 'TestNet',
 };
@@ -41,10 +34,10 @@ export const NETWORK_CONFIG = {
 // Keeping this as a typed configuration object allows the frontend to pass it in.
 
 export interface MidnightProviders<PrivateState> {
-  publicDataProvider: PublicDataProvider;
-  proofProvider: ProofProvider;
-  privateStateProvider: PrivateStateProvider<PrivateState>;
-  zkConfigProvider: ZkConfigProvider;
-  walletProvider: WalletProvider;
-  midnightProvider: MidnightProvider;
+  publicDataProvider: any;
+  proofProvider: any;
+  privateStateProvider: any;
+  zkConfigProvider: any;
+  walletProvider: any;
+  midnightProvider: any;
 }

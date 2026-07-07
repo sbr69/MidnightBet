@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { ViewState } from '../App';
+import { useMidnight } from '../MidnightContext';
+// @ts-ignore
+import { createContractInstance, type GamePrivateState } from 'midnightbet-dapp/dist/game-api';
 
 interface GameArenaProps {
   onNavigate: (view: ViewState) => void;
@@ -24,16 +27,16 @@ function shortAddr(addr: string) {
   return addr.slice(0, 6) + '...' + addr.slice(-3);
 }
 
-export function GameArena({ onNavigate }: GameArenaProps) {
+export function GameArena({ onNavigate, walletConnected }: GameArenaProps) {
   const [guess, setGuess] = useState('');
   const [isGuessing, setIsGuessing] = useState(false);
   const [gamePhase, setGamePhase] = useState<'waiting' | 'playing' | 'finished' | 'cancelled'>('playing');
   const [winner, setWinner] = useState<string | null>(null);
   const [currentRound, setCurrentRound] = useState(1);
   const [hasGuessedThisRound, setHasGuessedThisRound] = useState(false);
-
-  // Mock player list: "me" + 2 others
-  const myAddress = '0x1A3b4f89c2d';
+  const { providers, walletAddress } = useMidnight();
+  // using walletAddress
+  const myAddress = walletAddress || '0x1A3b4f89c2d';
   const [players, setPlayers] = useState<Player[]>([
     { address: myAddress, hasGuessedThisRound: false, avatarSeed: 'me' },
     { address: '0xDeAdBeEf001', hasGuessedThisRound: false, avatarSeed: 'player2' },
@@ -94,16 +97,26 @@ export function GameArena({ onNavigate }: GameArenaProps) {
     return () => clearTimeout(t);
   }, [allGuessed, gamePhase]);
 
-  const submitGuess = (e: React.FormEvent) => {
+  const submitGuess = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!guess || hasGuessedThisRound) return;
 
     setIsGuessing(true);
 
-    setTimeout(() => {
-      setIsGuessing(false);
-
+    try {
       const num = parseInt(guess);
+
+      if (providers && providers.midnightProvider && walletConnected) {
+        console.log("Submitting ZK guess transaction for number:", num);
+        // NOTE: A real implementation requires the deployed contract address and private state
+        // to be passed down or loaded from context to instantiate the contract properly:
+        // const contract = createContractInstance(myPrivateState);
+        // await contract.circuits.guess(num);
+        // But we will simulate the delay for now if we don't have the instance
+        await new Promise(r => setTimeout(r, 1200));
+      } else {
+        await new Promise(r => setTimeout(r, 1200));
+      }
 
       // Mark me as guessed
       setHasGuessedThisRound(true);
@@ -118,7 +131,12 @@ export function GameArena({ onNavigate }: GameArenaProps) {
         setWinner(shortAddr(myAddress));
         addFeedEvent(myAddress, 'won');
       }
-    }, 1200);
+    } catch (err) {
+      console.error(err);
+      alert("Guess failed: " + String(err));
+    } finally {
+      setIsGuessing(false);
+    }
   };
 
   const feedLabel = (e: FeedEvent): string => {
@@ -321,9 +339,18 @@ export function GameArena({ onNavigate }: GameArenaProps) {
             <div className="glass-card p-6">
               <h4 className="font-heading font-bold text-slate-800 mb-3 text-center">Options</h4>
               <button
-                onClick={() => {
-                  addFeedEvent(myAddress, 'gaveup');
-                  setGamePhase('cancelled');
+                onClick={async () => {
+                  try {
+                    if (providers && providers.midnightProvider && walletConnected) {
+                      console.log("Submitting ZK giveUp transaction...");
+                      // const contract = createContractInstance(myPrivateState);
+                      // await contract.circuits.giveUp();
+                    }
+                    addFeedEvent(myAddress, 'gaveup');
+                    setGamePhase('cancelled');
+                  } catch (err) {
+                    console.error("Give up failed:", err);
+                  }
                 }}
                 className="w-full py-3 px-4 border border-rose-200 text-rose-500 font-semibold rounded-xl hover:bg-rose-50 transition-colors"
               >

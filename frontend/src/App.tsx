@@ -2,22 +2,18 @@ import { useState } from 'react';
 import { Home } from './components/Home';
 import { CreateGame } from './components/CreateGame';
 import { GameArena } from './components/GameArena';
+import { useMidnight } from './MidnightContext';
 
 export type ViewState = 'home' | 'create' | 'arena';
 
 function App() {
   const [currentView, setCurrentView] = useState<ViewState>('home');
-  const [walletConnected, setWalletConnected] = useState(false);
-  const [walletAddress, setWalletAddress] = useState('');
+  const { isConnected, isConnecting, walletAddress, connect } = useMidnight();
 
-  // Mock wallet connection for now
   const connectWallet = async () => {
-    // In a real app, this would use @midnight-ntwrk/dapp-connector-api
-    setTimeout(() => {
-      setWalletConnected(true);
-      setWalletAddress('0x' + Array.from(crypto.getRandomValues(new Uint8Array(20)))
-        .map(b => b.toString(16).padStart(2, '0')).join(''));
-    }, 500);
+    if (!isConnected) {
+      await connect();
+    }
   };
 
   return (
@@ -37,25 +33,24 @@ function App() {
         </div>
         
         <div>
-          {walletConnected ? (
+          {isConnected && walletAddress ? (
             <div className="px-4 py-2 rounded-lg bg-white/80 border border-slate-200 shadow-sm font-mono text-sm text-slate-600 flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-              {walletAddress.slice(0,6)}...{walletAddress.slice(-4)}
+              {walletAddress.slice(0,10)}...{walletAddress.slice(-4)}
             </div>
           ) : (
-            <button onClick={connectWallet} className="btn-primary py-2 px-6 text-sm">
-              Connect Wallet
+            <button onClick={connectWallet} disabled={isConnecting} className="btn-primary py-2 px-6 text-sm">
+              {isConnecting ? 'Connecting...' : 'Connect Wallet'}
             </button>
           )}
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col items-center justify-center p-6 w-full max-w-5xl mx-auto">
         {currentView === 'home' && (
           <Home 
             onNavigate={setCurrentView} 
-            walletConnected={walletConnected} 
+            walletConnected={isConnected} 
             connectWallet={connectWallet} 
           />
         )}
@@ -63,14 +58,14 @@ function App() {
         {currentView === 'create' && (
           <CreateGame 
             onNavigate={setCurrentView} 
-            walletConnected={walletConnected} 
+            walletConnected={isConnected} 
           />
         )}
 
         {currentView === 'arena' && (
           <GameArena 
             onNavigate={setCurrentView} 
-            walletConnected={walletConnected} 
+            walletConnected={isConnected} 
           />
         )}
       </main>

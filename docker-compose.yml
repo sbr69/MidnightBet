@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  proof-server:
+    image: midnightntwrk/proof-server:latest
+    ports:
+      - "6300:6300"
+    volumes:
+      - ./contract/managed:/keys:ro
+    environment:
+      - KEYS_DIR=/keys

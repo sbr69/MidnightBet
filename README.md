@@ -2,26 +2,6 @@
 
 A multiplayer ZK number guessing game on the Midnight blockchain.
 
-## Project Structure
-
-```
-MidnightBet/
-├── contract/          # Compact smart contract (ZK circuits)
-│   ├── src/           # guessing-game.compact source
-│   ├── managed/       # Compiled ZK circuits, keys, TS bindings (generated)
-│   └── test/          # Vitest test suite
-├── dapp/              # DApp integration layer (TypeScript)
-│   └── src/
-│       ├── game-api.ts    # Witnesses, helpers, state mapping
-│       ├── providers.ts   # Midnight SDK provider configuration
-│       └── deploy.ts      # Deployment script
-└── frontend/          # React + Tailwind frontend
-    └── src/
-        └── components/    # Home, CreateGame, GameArena
-```
-
----
-
 ## Prerequisites
 
 ### 1. Compact Compiler
