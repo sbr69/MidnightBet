@@ -1,0 +1,189 @@
+pragma language_version >= 0.23.0;
+
+import CompactStandardLibrary;
+
+enum GamePhase {
+    WaitingForPlayers,
+    InProgress,
+    Finished,
+    Cancelled
+}
+
+struct UserSecretKey { bytes: Bytes<32>; }
+struct UserPublicKey { bytes: Bytes<32>; }
+
+struct TargetCommitment {
+    target: Uint<64>,
+    salt: Bytes<32>
+}
+
+// ----------------------------------------------------
+// Public Ledger State
+// ----------------------------------------------------
+
+export ledger gamePhase: GamePhase;
+export ledger maxPlayers: Uint<8>;
+export ledger currentPlayerCount: Counter;
+export ledger rangeMin: Uint<64>;
+export ledger rangeMax: Uint<64>;
+export ledger stakeAmount: Uint<64>;
+export ledger totalPool: Uint<64>;
+export ledger targetHash: Bytes<32>;
+export ledger winner: UserPublicKey;
+export ledger creator: UserPublicKey;
+
+export ledger players: Map<UserPublicKey, Boolean>;
+export ledger balances: Map<UserPublicKey, Uint<64>>;
+export ledger latestGuesses: Map<UserPublicKey, Uint<64>>;
+export ledger hasGivenUp: Map<UserPublicKey, Boolean>;
+export ledger giveUpCount: Counter;
+
+// ----------------------------------------------------
+// Witnesses
+// ----------------------------------------------------
+
+witness getUserSecret(): UserSecretKey;
+witness getTargetSalt(): Bytes<32>;
+
+// ----------------------------------------------------
+// Helpers
+// ----------------------------------------------------
+
+export circuit deriveUserPublicKey(sk: UserSecretKey): UserPublicKey {
+    return UserPublicKey {
+        bytes: persistentHash<Vector<2, Bytes<32>>>([
+            pad(32, "midnightbet:user:v1"),
+            sk.bytes
+        ])
+    };
+}
+
+export circuit getBalance(account: UserPublicKey): Uint<64> {
+    if (!balances.member(disclose(account))) {
+        return 0;
+    }
+    return balances.lookup(disclose(account));
+}
+
+// ----------------------------------------------------
+// Circuits
+// ----------------------------------------------------
+
+constructor(
+    _maxPlayers: Uint<8>,
+    _rangeMin: Uint<64>,
+    _rangeMax: Uint<64>,
+    _stakeAmount: Uint<64>,
+    _targetHash: Bytes<32>
+) {
+    const caller = disclose(deriveUserPublicKey(getUserSecret()));
+    creator = caller;
+    maxPlayers = _maxPlayers;
+    rangeMin = _rangeMin;
+    rangeMax = _rangeMax;
+    stakeAmount = _stakeAmount;
+    targetHash = _targetHash;
+    gamePhase = GamePhase.WaitingForPlayers;
+    totalPool = 0;
+}
+
+// Internal token faucet for testing/playing
+export circuit faucet(): [] {
+    const caller = disclose(deriveUserPublicKey(getUserSecret()));
+    const currentBalance = getBalance(caller);
+    balances.insert(caller, disclose(currentBalance + 1000));
+}
+
+export circuit joinGame(): [] {
+    assert(gamePhase == GamePhase.WaitingForPlayers, "Game not accepting players");
+    
+    const caller = disclose(deriveUserPublicKey(getUserSecret()));
+    assert(!players.member(caller) || players.lookup(caller) == false, "Already joined");
+    
+    const currentBalance = getBalance(caller);
+    assert(currentBalance >= stakeAmount, "Insufficient internal balance for stake");
+    
+    balances.insert(caller, disclose(currentBalance - stakeAmount));
+    players.insert(caller, true);
+    currentPlayerCount.increment(1);
+    
+    // Can't directly assign totalPool = totalPool + stakeAmount in Compact if it causes widening without cast, 
+    // but since it's an assignment to a Uint<64> ledger, let's cast explicitly.
+    const newPool = totalPool + stakeAmount;
+    totalPool = newPool as Uint<64>;
+    
+    if (currentPlayerCount.read() == (maxPlayers as Uint<32>)) {
+        gamePhase = GamePhase.InProgress;
+    }
+}
+
+export circuit guess(number: Uint<64>): [] {
+    assert(gamePhase == GamePhase.InProgress, "Game not in progress");
+    assert(number >= rangeMin && number <= rangeMax, "Guess out of range");
+    
+    const caller = disclose(deriveUserPublicKey(getUserSecret()));
+    assert(players.member(caller) && players.lookup(caller) == true, "Not an active player");
+    
+    latestGuesses.insert(caller, disclose(number));
+}
+
+export circuit declareWinner(player: UserPublicKey, targetNumber: Uint<64>): [] {
+    const caller = disclose(deriveUserPublicKey(getUserSecret()));
+    assert(caller == creator, "Only creator can declare winner");
+    assert(gamePhase == GamePhase.InProgress, "Game not in progress");
+    
+    // Verify target number matches the committed hash
+    const salt = getTargetSalt();
+    const commitment = TargetCommitment { target: targetNumber, salt: salt };
+    assert(targetHash == persistentHash<TargetCommitment>(commitment), "Target number does not match commitment");
+    
+    // Verify the player actually guessed this number
+    assert(latestGuesses.member(player), "Player has no guess");
+    const pGuess = latestGuesses.lookup(player);
+    assert(pGuess == targetNumber, "Player guess is incorrect");
+    
+    // End game and award winner
+    gamePhase = GamePhase.Finished;
+    winner = player;
+    
+    const winnerBalance = getBalance(player);
+    const newBalance = winnerBalance + totalPool;
+    balances.insert(player, disclose(newBalance as Uint<64>));
+}
+
+export circuit giveUp(): [] {
+    assert(gamePhase == GamePhase.InProgress, "Game not in progress");
+    
+    const caller = disclose(deriveUserPublicKey(getUserSecret()));
+    assert(players.member(caller) && players.lookup(caller) == true, "Not an active player");
+    assert(!hasGivenUp.member(caller) || hasGivenUp.lookup(caller) == false, "Already gave up");
+    
+    hasGivenUp.insert(caller, true);
+    giveUpCount.increment(1);
+    
+    if (giveUpCount.read() == (maxPlayers as Uint<32>)) {
+        gamePhase = GamePhase.Cancelled;
+    }
+}
+
+export circuit cancelGame(): [] {
+    const caller = disclose(deriveUserPublicKey(getUserSecret()));
+    assert(caller == creator, "Only creator can cancel");
+    assert(gamePhase == GamePhase.WaitingForPlayers, "Cannot cancel now");
+    gamePhase = GamePhase.Cancelled;
+}
+
+export circuit claimRefund(): [] {
+    assert(gamePhase == GamePhase.Cancelled, "Game not cancelled");
+    
+    const caller = disclose(deriveUserPublicKey(getUserSecret()));
+    assert(players.member(caller) && players.lookup(caller) == true, "Not an active player or already refunded");
+    
+    // Mark as refunded
+    players.insert(caller, false);
+    
+    // Refund the stake
+    const currentBalance = getBalance(caller);
+    const newBalance = currentBalance + stakeAmount;
+    balances.insert(caller, disclose(newBalance as Uint<64>));
+}

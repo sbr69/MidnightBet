@@ -1,0 +1,18 @@
+{
+  "name": "midnightbet-contract",
+  "version": "1.0.0",
+  "description": "MidnightBet Smart Contract",
+  "scripts": {
+    "compile": "compact compile src/guessing-game.compact managed/guessing-game",
+    "test": "vitest run",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "^0.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}
