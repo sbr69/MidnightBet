@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-midnight-lightest text-slate-800 font-body m-0 p-0 overflow-x-hidden;
+    background-image: 
+      radial-gradient(at 0% 0%, hsla(253,16%,7%,0.05) 0, transparent 50%), 
+      radial-gradient(at 50% 0%, hsla(225,39%,30%,0.05) 0, transparent 50%), 
+      radial-gradient(at 100% 0%, hsla(339,49%,30%,0.05) 0, transparent 50%);
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/70 backdrop-blur-lg border border-white/40 rounded-2xl p-8 shadow-xl shadow-slate-200/50;
+  }
+  
+  .btn-primary {
+    @apply relative overflow-hidden rounded-xl px-8 py-4 font-heading font-semibold text-white tracking-wide transition-all duration-300 transform;
+    background: linear-gradient(135deg, #0ea5e9, #8b5cf6);
+  }
+  
+  .btn-primary:hover {
+    @apply shadow-lg shadow-primary/30 scale-[1.02] -translate-y-0.5;
+  }
+
+  .btn-secondary {
+    @apply relative overflow-hidden rounded-xl px-8 py-4 font-heading font-semibold tracking-wide text-slate-700 bg-white/80 border border-slate-200 transition-all duration-300 transform;
+  }
+
+  .btn-secondary:hover {
+    @apply bg-white shadow-md shadow-slate-200/50 scale-[1.02] -translate-y-0.5 border-slate-300;
+  }
+  
+  .input-field {
+    @apply w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/80 text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all;
+  }
+}
