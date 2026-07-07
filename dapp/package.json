@@ -1,0 +1,21 @@
+{
+  "name": "midnightbet-dapp",
+  "version": "1.0.0",
+  "description": "MidnightBet DApp integration layer",
+  "type": "module",
+  "scripts": {
+    "deploy": "tsx src/deploy.ts",
+    "cli": "tsx src/cli.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.16.0",
+    "@midnight-ntwrk/midnight-js": "4.1.1",
+    "@midnight-ntwrk/dapp-connector-api": "4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0",
+    "tsx": "^4.0.0"
+  }
+}
