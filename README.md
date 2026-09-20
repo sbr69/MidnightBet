@@ -1,106 +1,81 @@
-# MidnightBet 🌙
+# MidnightBet
 
-A multiplayer ZK number guessing game on the Midnight blockchain.
+A multiplayer zero-knowledge number guessing game on the Midnight blockchain. The host commits to a private target; players stake in-contract tokens, guess in rounds, and the host declares the winner with a ZK proof.
+
+This is not a sportsbook.
 
 ## Prerequisites
 
-### 1. Compact Compiler
-The contract is compiled with the Midnight `compact` CLI. If you need to recompile:
-```bash
-# In WSL:
-~/.local/bin/compact compile contract/src/guessing-game.compact contract/managed/guessing-game
-```
+- Node.js 22+
+- [Compact compiler](https://docs.midnight.network/getting-started/installation#install-compact) (contract is already compiled in `contract/managed/`)
+- A Midnight-compatible browser wallet:
+  - **[1AM Wallet](https://1am.xyz/) (Recommended):** Native remote ZK proving (ProofStation) and DUST sponsorship — **no Docker required!**
+  - **[Lace Wallet](https://www.lace.io/):** Official IOG wallet extension.
+- Midnight **Preview** network tokens:
+  - tNIGHT from the Midnight Preview faucet, then register/generate tDUST in your wallet.
 
-### 2. Docker Services (Required for local development)
+## Compile the contract
 
-You need three Docker services running before the DApp can interact with the blockchain:
-
-```yaml
-# docker-compose.yml (place in project root)
-version: '3.8'
-services:
-  midnight-node:
-    image: midnightnetwork/proof-server:latest
-    ports:
-      - "9944:9944"
-    environment:
-      - NETWORK_ID=undeployed
-
-  proof-server:
-    image: midnightnetwork/proof-server:latest
-    ports:
-      - "6300:6300"
-    volumes:
-      - ./contract/managed:/keys:ro
-    environment:
-      - KEYS_DIR=/keys
-
-  indexer:
-    image: midnightnetwork/indexer:latest
-    ports:
-      - "8088:8088"
-    environment:
-      - NODE_URI=http://midnight-node:9944
-```
-
-**Start services:**
-```bash
-docker-compose up -d
-```
-
-**Verify services are healthy:**
-```bash
-curl http://localhost:6300/health       # proof-server
-curl http://localhost:8088/api/v1/health # indexer
-```
-
-### 3. Lace Wallet
-- Install the [Lace Wallet](https://www.lace.io/) browser extension
-- Enable the Midnight DApp connector in Lace settings
-- Fund your wallet with tDUST from the [Midnight faucet](https://faucet.midnight.network/)
-
----
-
-## Running the Frontend
+The contract is already compiled under `contract/managed/guessing-game/`. If you modify `contract/src/guessing-game.compact`, recompile:
 
 ```bash
-cd frontend
-npm install
-npm run dev
-# Opens at http://localhost:5173
+npm run compile
+# expands to: compact compile contract/src/guessing-game.compact contract/managed/guessing-game
 ```
 
----
-
-## Deploying the Contract
+Copy proving keys into the frontend (`keys/` and `zkir/`):
 
 ```bash
-cd dapp
-npm install
-npm run deploy
-# Generates deployment.json with contract address + private state
+npm run copy-zk
 ```
 
----
+## ZK Prover (No Docker Needed with 1AM Wallet)
 
-## Game Flow
+- **With 1AM Wallet:** 1AM includes built-in remote ZK proving (**ProofStation**). You do **not** need to run any local containers.
+- **Optional Local Prover (Docker):** If you are using Lace and need a local prover:
+  ```bash
+  npm run proof-server
+  # runs proof-server on http://localhost:6300
+  ```
 
-1. **Create Game** → Creator sets players, range, stake → ZK contract deployed with private target hash
-2. **Share Invite Link** → URL encodes the contract address
-3. **Players Join** → Each pays stake → once all joined, game starts
-4. **Round-Based Guessing** → All players guess once per round → next round starts when everyone guesses
-5. **Win** → Creator's `declareWinner` verifies a player's guess matches the private target via ZK proof
-6. **Refund** → If all give up, or lobby incomplete → full stake refund
+## Run the DApp (Preview Network)
 
----
+```bash
+# Start the frontend dev server
+npm run frontend
+# or: npm run dev --prefix frontend
+# Opens http://localhost:5173
+```
 
-## Privacy Model
+Connect your wallet (**1AM** or **Lace**), create a game (this deploys the contract directly to Midnight Preview from your browser), share `/?game=<address>`, and play.
 
-| What | On-Chain? |
-|------|-----------|
-| Game parameters (range, stake, players) | ✅ Public |
-| Target number | ❌ Private (ZK witness) |
-| Target hash (commitment) | ✅ Public |
-| Player public keys | ✅ Public (disclosed on join) |
-| Individual guesses (the number) | ✅ Public (disclosed on submit — by design for round tracking) |
-| Winner | ✅ Public |
+## Scripts that do not deploy
+
+| Command | What it does |
+| --- | --- |
+| `npm run prepare-deploy` | Writes gitignored `deployment.json` with a local target commitment. **Does not** submit a transaction. |
+| `npm run --prefix dapp cli -- hash` | Prints a `persistentCommit` matching Compact. |
+
+## Game flow
+
+1. Host sets players, range, stake. The target is committed with Compact `persistentCommit`.
+2. Invite URL encodes the contract address.
+3. Each player calls `faucet` (test balances) then `joinGame`.
+4. One guess per round; the round advances when all active players have guessed.
+5. Host `declareWinner` when a stored guess matches the private target.
+6. `giveUp` / host `cancelGame` → `Cancelled` → `claimRefund`.
+
+## Privacy
+
+| What | On-chain? |
+| --- | --- |
+| Range, stake, player count | Public |
+| Target number | Private until a winner is declared |
+| Target commitment | Public |
+| Guesses | Public (round tracking) |
+
+## Layout
+
+- `contract/` — Compact circuits
+- `dapp/` — midnight-js providers, witnesses, `callTx` helpers
+- `frontend/` — React UI (Lace + live ledger)

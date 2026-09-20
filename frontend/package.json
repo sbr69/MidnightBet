@@ -4,14 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "node ../scripts/copy-zk-artifacts.mjs && vite",
+    "build": "node ../scripts/copy-zk-artifacts.mjs && tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
     "@midnight-ntwrk/dapp-connector-api": "^4.0.1",
     "@midnight-ntwrk/midnight-js": "^4.1.1",
+    "buffer": "^6.0.3",
+    "events": "^3.3.0",
     "midnightbet-dapp": "file:../dapp",
     "pino": "^10.3.1",
     "react": "^19.2.7",

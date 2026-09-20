@@ -12,11 +12,6 @@ enum GamePhase {
 struct UserSecretKey { bytes: Bytes<32>; }
 struct UserPublicKey { bytes: Bytes<32>; }
 
-struct TargetCommitment {
-    target: Uint<64>,
-    salt: Bytes<32>
-}
-
 // ----------------------------------------------------
 // Public Ledger State
 // ----------------------------------------------------
@@ -147,6 +142,7 @@ export circuit guess(number: Uint<64>): [] {
 
     const caller = disclose(deriveUserPublicKey(getUserSecret()));
     assert(players.member(caller) && players.lookup(caller) == true, "Not an active player");
+    assert(!hasGivenUp.member(caller) || hasGivenUp.lookup(caller) == false, "Player has given up");
 
     // Block double-guessing within the same round
     const thisRound = currentRound.read() as Uint<32>;
@@ -179,8 +175,7 @@ export circuit declareWinner(player: UserPublicKey, targetNumber: Uint<64>): [] 
 
     // Verify the revealed target matches the on-chain commitment
     const salt = getTargetSalt();
-    const commitment = TargetCommitment { target: targetNumber, salt: salt };
-    assert(targetHash == persistentHash<TargetCommitment>(commitment), "Target hash mismatch");
+    assert(targetHash == persistentCommit(targetNumber, salt), "Target hash mismatch");
 
     const disclosedPlayer = disclose(player);
 
@@ -206,7 +201,7 @@ export circuit giveUp(): [] {
     hasGivenUp.insert(caller, true);
     giveUpCount.increment(1);
 
-    if (giveUpCount.read() == (maxPlayers as Uint<64>)) {
+    if (giveUpCount.read() == (maxPlayers as Uint<32>)) {
         gamePhase = GamePhase.Cancelled;
     }
 }

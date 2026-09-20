@@ -1,14 +1,40 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
-// @ts-ignore
-import { type MidnightProviders, type GamePrivateState } from 'midnightbet-dapp/dist/game-api.js';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  applyNetworkId,
+  buildBrowserProviders,
+  connectMidnightWallet,
+  connectToGame,
+  decodeInviteLink,
+  getAvailableWallets,
+  loadOrCreateSecretKey,
+  NETWORK_CONFIG,
+  privateStateFor,
+  type DeployedGame,
+  type GamePrivateState,
+  type GameProviders,
+  type GameState,
+  type WalletInfo,
+} from 'midnightbet-dapp';
 
 interface MidnightContextType {
   isConnecting: boolean;
   isConnected: boolean;
   error: string | null;
   walletAddress: string | null;
-  connect: () => Promise<void>;
-  providers: MidnightProviders<GamePrivateState> | null;
+  walletName: string | null;
+  availableWallets: WalletInfo[];
+  networkId: string;
+  providers: GameProviders | null;
+  privateState: GamePrivateState;
+  contractAddress: string | null;
+  deployed: DeployedGame | null;
+  gameState: GameState | null;
+  connect: (walletId?: string) => Promise<void>;
+  attachGame: (address: string) => Promise<DeployedGame>;
+  setContractAddress: (address: string | null) => void;
+  setDeployed: (d: DeployedGame | null) => void;
+  setGameState: (s: GameState | null) => void;
+  clearError: () => void;
 }
 
 const MidnightContext = createContext<MidnightContextType | undefined>(undefined);
@@ -18,48 +44,92 @@ export function MidnightProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
-  const [providers, setProviders] = useState<MidnightProviders<GamePrivateState> | null>(null);
+  const [walletName, setWalletName] = useState<string | null>(null);
+  const [availableWallets, setAvailableWallets] = useState<WalletInfo[]>([]);
+  const [activeNetwork, setActiveNetwork] = useState<string>(String(NETWORK_CONFIG.networkId));
+  const [providers, setProviders] = useState<GameProviders | null>(null);
+  const [contractAddress, setContractAddress] = useState<string | null>(() => decodeInviteLink());
+  const [deployed, setDeployed] = useState<DeployedGame | null>(null);
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const privateState = useMemo(() => privateStateFor(contractAddress ?? undefined), [contractAddress]);
 
-  const connect = async () => {
+  // Scan for available wallets on load and window focus
+  useEffect(() => {
+    const scan = () => {
+      const found = getAvailableWallets();
+      setAvailableWallets(found);
+    };
+    scan();
+    const interval = setInterval(scan, 1000);
+    window.addEventListener('focus', scan);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', scan);
+    };
+  }, []);
+
+  const connect = useCallback(async (walletId?: string) => {
     setIsConnecting(true);
     setError(null);
     try {
-      // For now, let's just mock the connection or use a very basic connection logic.
-      // E2E Midnight setup requires multiple specific providers from different packages.
-      // Because we are running in an environment without the Lace wallet installed possibly,
-      // and wiring all providers strictly can cause build issues depending on the exact Midnight SDK version.
-      
-      // Let's check if the window has the Midnight Lace connector
-      const w = window as any;
-      if (!w.midnight?.lace) {
-        throw new Error('Lace wallet not found. Please install the Lace browser extension and enable the Midnight DApp connector.');
-      }
-
-      // 1. Connect to Wallet
-      const walletAPI = await w.midnight.lace.enable();
-      const state = await walletAPI.state();
-      setWalletAddress(state.address);
-
-      // In a full implementation, we'd initialize:
-      // - IndexerPublicDataProvider
-      // - HttpClientProofProvider
-      // - BrowserPrivateStateProvider (indexedDB)
-      // - DAppConnectorWalletProvider
-      // - MidnightProvider
-      
-      // We will set dummy providers for now until the exact SDK 4.1 exports are aligned.
-      setProviders({} as any);
+      applyNetworkId(String(NETWORK_CONFIG.networkId));
+      loadOrCreateSecretKey();
+      const { api, address, networkId, walletName: connectedWalletName } = await connectMidnightWallet(
+        walletId,
+        String(NETWORK_CONFIG.networkId),
+      );
+      applyNetworkId(networkId);
+      setActiveNetwork(networkId);
+      setWalletName(connectedWalletName);
+      const nextProviders = await buildBrowserProviders(api, address);
+      setProviders(nextProviders);
+      setWalletAddress(address);
       setIsConnected(true);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Failed to connect to Midnight network');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to connect to Midnight';
+      setError(message);
+      throw err;
     } finally {
       setIsConnecting(false);
     }
-  };
+  }, []);
+
+  const attachGame = useCallback(
+    async (address: string) => {
+      if (!providers) {
+        throw new Error('Connect your Midnight wallet (1AM or Lace) first');
+      }
+      setContractAddress(address);
+      const found = await connectToGame(providers, address, privateStateFor(address));
+      setDeployed(found);
+      return found;
+    },
+    [providers],
+  );
 
   return (
-    <MidnightContext.Provider value={{ isConnecting, isConnected, error, walletAddress, connect, providers }}>
+    <MidnightContext.Provider
+      value={{
+        isConnecting,
+        isConnected,
+        error,
+        walletAddress,
+        walletName,
+        availableWallets,
+        networkId: activeNetwork,
+        providers,
+        privateState,
+        contractAddress,
+        deployed,
+        gameState,
+        connect,
+        attachGame,
+        setContractAddress,
+        setDeployed,
+        setGameState,
+        clearError: () => setError(null),
+      }}
+    >
       {children}
     </MidnightContext.Provider>
   );
@@ -71,4 +141,18 @@ export function useMidnight() {
     throw new Error('useMidnight must be used within a MidnightProvider');
   }
   return context;
+}
+
+export function formatError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/wallet not found|lace|1am/i.test(message)) {
+    return 'No Midnight wallet detected. Please install 1AM Wallet (1am.xyz) or Lace (lace.io).';
+  }
+  if (/dust|fee|balance/i.test(message)) {
+    return 'Insufficient DUST or tNIGHT on Midnight Preview. Request testnet tokens from the faucet.';
+  }
+  if (/Compact output missing|compile/i.test(message)) {
+    return 'Contract not compiled. Compact compilation artifacts are required.';
+  }
+  return message;
 }

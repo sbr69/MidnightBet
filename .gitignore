@@ -3,6 +3,9 @@ dist/
 dist-ssr/
 coverage/
 managed/
+frontend/public/keys/
+frontend/public/zkir/
+deployment.json
 *.tsbuildinfo
 .vite/
 
