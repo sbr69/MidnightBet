@@ -201,7 +201,7 @@ export circuit giveUp(): [] {
     hasGivenUp.insert(caller, true);
     giveUpCount.increment(1);
 
-    if (giveUpCount.read() == (maxPlayers as Uint<32>)) {
+    if (giveUpCount.read() == (currentPlayerCount.read() as Uint<32>)) {
         gamePhase = GamePhase.Cancelled;
     }
 }

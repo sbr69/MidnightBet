@@ -159,7 +159,7 @@ export async function buildBrowserProviders(
     privateStateProvider,
     zkConfigProvider,
     proofProvider: httpClientProofProvider(proofServerUri, zkConfigProvider),
-    publicDataProvider: indexerPublicDataProvider(indexerUri, indexerWsUri),
+    publicDataProvider: indexerPublicDataProvider(indexerUri, indexerWsUri, globalThis.WebSocket as never),
     walletProvider: {
       getCoinPublicKey() {
         return shieldedAddresses.shieldedCoinPublicKey;
@@ -202,6 +202,7 @@ export function createReadOnlyProviders(zkArtifactsOrigin?: string): Pick<
     publicDataProvider: indexerPublicDataProvider(
       NETWORK_CONFIG.indexerUri,
       NETWORK_CONFIG.indexerWsUri,
+      globalThis.WebSocket as never,
     ),
   };
 }

@@ -102,7 +102,7 @@ export function ledgerToGameState(l: Ledger): GameState {
 }
 
 export function encodeInviteLink(contractAddress: string): string {
-  const base = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
+  const base = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
   return `${base}/?game=${encodeURIComponent(contractAddress)}`;
 }
 

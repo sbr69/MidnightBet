@@ -154,5 +154,8 @@ export function formatError(err: unknown): string {
   if (/Compact output missing|compile/i.test(message)) {
     return 'Contract not compiled. Compact compilation artifacts are required.';
   }
+  if (/fetch failed|proof-server|6300|connection refused|Failed to fetch/i.test(message)) {
+    return 'Could not reach ZK proof server (port 6300). Lace requires a local Docker proof server, or use 1AM Wallet which includes automatic remote ZK proving.';
+  }
   return message;
 }

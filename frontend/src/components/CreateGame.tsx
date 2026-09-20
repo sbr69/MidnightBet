@@ -8,7 +8,6 @@ import {
   encodeInviteLink,
   generateTargetNumber,
   loadOrCreateSecretKey,
-  rememberHostGame,
 } from 'midnightbet-dapp';
 
 interface CreateGameProps {
@@ -51,11 +50,6 @@ export function CreateGame({ onNavigate, walletConnected }: CreateGameProps) {
         },
       );
 
-      rememberHostGame({
-        contractAddress,
-        targetSaltHex: Array.from(targetSalt).map((b) => b.toString(16).padStart(2, '0')).join(''),
-        targetNumber: targetNumber.toString(),
-      });
       setContractAddress(contractAddress);
       setDeployed(deployed);
       setInvite(encodeInviteLink(contractAddress));

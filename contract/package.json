@@ -2,6 +2,7 @@
   "name": "midnightbet-contract",
   "version": "1.0.0",
   "description": "MidnightBet Smart Contract",
+  "type": "module",
   "scripts": {
     "compile": "compact compile src/guessing-game.compact managed/guessing-game",
     "test": "vitest run",

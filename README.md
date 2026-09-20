@@ -44,7 +44,7 @@ npm run copy-zk
 # Start the frontend dev server
 npm run frontend
 # or: npm run dev --prefix frontend
-# Opens http://localhost:5173
+# Opens http://localhost:3000
 ```
 
 Connect your wallet (**1AM** or **Lace**), create a game (this deploys the contract directly to Midnight Preview from your browser), share `/?game=<address>`, and play.

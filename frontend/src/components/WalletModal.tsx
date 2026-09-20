@@ -94,7 +94,7 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
                     <div className="font-heading font-bold text-slate-800 group-hover:text-slate-900 transition">
                       Lace Wallet
                     </div>
-                    <div className="text-xs text-slate-500">Midnight DApp Connector</div>
+                    <div className="text-xs text-slate-500">Midnight DApp Connector · Requires local ProofStation (port 6300)</div>
                   </div>
                 </div>
                 <span className="text-slate-400 group-hover:translate-x-0.5 transition">→</span>
@@ -149,7 +149,7 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
               >
                 <div>
                   <div className="font-heading font-bold text-xs text-slate-800">Get Lace Wallet</div>
-                  <div className="text-[11px] text-slate-500">Official IOG Midnight wallet extension</div>
+                  <div className="text-[11px] text-slate-500">Official IOG Midnight wallet (requires local Docker proof server)</div>
                 </div>
                 <span className="text-xs text-slate-600 font-bold">Install ↗</span>
               </a>

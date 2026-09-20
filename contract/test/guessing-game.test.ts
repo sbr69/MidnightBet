@@ -14,7 +14,7 @@ describe('MidnightBet Compact contract', () => {
       path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/guessing-game.compact'),
       'utf8',
     );
-    expect(src).toContain('giveUpCount.read() == (maxPlayers as Uint<32>)');
+    expect(src).toContain('giveUpCount.read() == (currentPlayerCount.read() as Uint<32>)');
     expect(src).toContain('Player has given up');
     expect(src).toContain('persistentCommit(targetNumber, salt)');
     expect(src).not.toContain('maxPlayers as Uint<64>');
