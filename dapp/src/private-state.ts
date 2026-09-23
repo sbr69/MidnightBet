@@ -8,7 +8,8 @@ export interface GamePrivateState {
 }
 
 export interface HostGameRecord {
-  contractAddress: string;
+  contractAddress?: string;
+  roomCode: string;
   targetSaltHex: string;
   targetNumber: string;
 }
@@ -44,7 +45,14 @@ export function loadOrCreateSecretKey(): Uint8Array {
 export function rememberHostGame(record: HostGameRecord): void {
   if (typeof localStorage === 'undefined') return;
   const all = listHostGames();
-  const next = [record, ...all.filter((g) => g.contractAddress !== record.contractAddress)];
+  const next = [
+    record,
+    ...all.filter(
+      (g) =>
+        (record.roomCode && g.roomCode !== record.roomCode) ||
+        (record.contractAddress && g.contractAddress !== record.contractAddress),
+    ),
+  ];
   localStorage.setItem(HOST_GAMES_STORAGE, JSON.stringify(next));
 }
 
@@ -58,14 +66,19 @@ export function listHostGames(): HostGameRecord[] {
   }
 }
 
-export function hostRecordFor(contractAddress: string): HostGameRecord | undefined {
-  return listHostGames().find((g) => g.contractAddress === contractAddress);
+export function hostRecordFor(identifier: string): HostGameRecord | undefined {
+  const clean = identifier.trim().toUpperCase();
+  return listHostGames().find(
+    (g) =>
+      (g.roomCode && g.roomCode.toUpperCase() === clean) ||
+      (g.contractAddress && g.contractAddress === identifier),
+  );
 }
 
-export function privateStateFor(contractAddress?: string): GamePrivateState {
+export function privateStateFor(identifier?: string): GamePrivateState {
   const secretKey = loadOrCreateSecretKey();
-  if (!contractAddress) return { secretKey };
-  const host = hostRecordFor(contractAddress);
+  if (!identifier) return { secretKey };
+  const host = hostRecordFor(identifier);
   if (!host) return { secretKey };
   return {
     secretKey,

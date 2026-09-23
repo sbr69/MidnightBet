@@ -8,16 +8,17 @@ const managed = path.resolve(
   '../managed/guessing-game/contract/index.js',
 );
 
-describe('MidnightBet Compact contract', () => {
-  test('giveUp compares player count as Uint<32> (source check)', () => {
+describe('MidnightBet Compact contract (Single Hub Architecture)', () => {
+  test('source checks for room-based structure', () => {
     const src = fs.readFileSync(
       path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/guessing-game.compact'),
       'utf8',
     );
-    expect(src).toContain('giveUpCount.read() == (currentPlayerCount.read() as Uint<32>)');
-    expect(src).toContain('Player has given up');
-    expect(src).toContain('persistentCommit(targetNumber, salt)');
-    expect(src).not.toContain('maxPlayers as Uint<64>');
+    expect(src).toContain('createRoom');
+    expect(src).toContain('joinRoom');
+    expect(src).toContain('cancelRoom');
+    expect(src).toContain('roomPlayerKey');
+    expect(src).toContain('persistentCommit<Uint<64>>(targetNumber, salt)');
   });
 
   test('compiled JS is present and exposes Contract and pureCircuits', async () => {
@@ -26,6 +27,7 @@ describe('MidnightBet Compact contract', () => {
     expect(mod.Contract).toBeDefined();
     expect(mod.pureCircuits).toBeDefined();
     expect(typeof mod.pureCircuits.deriveUserPublicKey).toBe('function');
+    expect(typeof mod.pureCircuits.roomPlayerKey).toBe('function');
 
     // Test pure circuit: derive public key from 32-byte secret key
     const secretKey = new Uint8Array(32).fill(7);
@@ -34,18 +36,25 @@ describe('MidnightBet Compact contract', () => {
     expect(publicKey.bytes).toBeInstanceOf(Uint8Array);
     expect(publicKey.bytes.length).toBe(32);
 
-    // Verify Contract instance has circuits defined
+    // Test pure circuit: roomPlayerKey
+    const roomId = new Uint8Array(32).fill(1);
+    const playerKey = mod.pureCircuits.roomPlayerKey(roomId, publicKey);
+    expect(playerKey).toBeInstanceOf(Uint8Array);
+    expect(playerKey.length).toBe(32);
+
+    // Verify Contract instance has all hub circuits defined
     const contract = new mod.Contract({
       getUserSecret: () => [undefined, { bytes: secretKey }],
       getTargetSalt: () => [undefined, new Uint8Array(32)],
     });
     expect(contract.circuits).toBeDefined();
     expect(contract.circuits.faucet).toBeDefined();
-    expect(contract.circuits.joinGame).toBeDefined();
+    expect(contract.circuits.createRoom).toBeDefined();
+    expect(contract.circuits.joinRoom).toBeDefined();
     expect(contract.circuits.guess).toBeDefined();
     expect(contract.circuits.declareWinner).toBeDefined();
     expect(contract.circuits.giveUp).toBeDefined();
-    expect(contract.circuits.cancelGame).toBeDefined();
+    expect(contract.circuits.cancelRoom).toBeDefined();
     expect(contract.circuits.claimRefund).toBeDefined();
   });
 });

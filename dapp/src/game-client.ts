@@ -1,22 +1,30 @@
 /**
- * Chain operations. Requires compiled Compact output under contract/managed/.
- * Callers in the UI invoke these; this module does not run a deploy by itself.
+ * Single Hub operations for MidnightBet.
+ * Contract is deployed once; rooms are created and joined via circuit calls.
  */
 
 import { deployContract, findDeployedContract, getPublicStates } from '@midnight-ntwrk/midnight-js-contracts';
 import { CompiledContract } from '@midnight-ntwrk/midnight-js-protocol/compact-js';
 import type { GameProviders } from './providers.js';
-import { buildWitnesses, ledgerToGameState, privateStateIdFor, type GameState } from './game-api.js';
+import {
+  buildWitnesses,
+  codeToRoomId,
+  ledgerToRoomState,
+  privateStateIdFor,
+  type GameState,
+} from './game-api.js';
 import { computeTargetHash } from './hash.js';
 import {
   bytesToHex,
+  hexToBytes,
   rememberHostGame,
   type GamePrivateState,
 } from './private-state.js';
 
-const MANAGED_PATH = new URL('../../contract/managed/guessing-game/', import.meta.url);
+const MANAGED_PATH = 'contract/managed/guessing-game';
 
-export interface CreateGameParams {
+export interface CreateRoomParams {
+  roomCode: string;
   maxPlayers: bigint;
   rangeMin: bigint;
   rangeMax: bigint;
@@ -30,7 +38,7 @@ async function loadGenerated() {
     return await import('../../contract/managed/guessing-game/contract/index.js');
   } catch {
     throw new Error(
-      'Compact output missing. Compile first: npm run compile (requires the Compact CLI).',
+      'Compact output missing. Compile first: npm run compile.',
     );
   }
 }
@@ -46,53 +54,41 @@ export async function compiledGuessingGame(privateState: GamePrivateState) {
   const made = CC.make('guessing-game', generated.Contract);
   if (typeof made.pipe === 'function') {
     try {
-      return made.pipe(CC.withWitnesses(witnesses), CC.withCompiledFileAssets(MANAGED_PATH.pathname));
+      return made.pipe(CC.withWitnesses(witnesses), CC.withCompiledFileAssets(MANAGED_PATH));
     } catch {
       return made.pipe(CC.withWitnesses(witnesses));
     }
   }
   const withW = CC.withWitnesses(made, witnesses);
   try {
-    return CC.withCompiledFileAssets(withW, MANAGED_PATH.pathname);
+    return CC.withCompiledFileAssets(withW, MANAGED_PATH);
   } catch {
     return withW;
   }
 }
 
-export async function deployGame(
+/**
+ * Deploy the Single Hub Contract once to Midnight Preview.
+ */
+export async function deployHub(
   providers: GameProviders,
   privateState: GamePrivateState,
-  params: CreateGameParams,
 ) {
-  const targetHash = computeTargetHash(params.targetNumber, params.targetSalt);
   const compiledContract = (await compiledGuessingGame(privateState)) as never;
   const deployed = await deployContract(providers as never, {
     compiledContract,
-    privateStateId: 'midnightbet:pending-deploy',
+    privateStateId: 'midnightbet:hub-deploy',
     initialPrivateState: privateState,
-    args: [
-      params.maxPlayers,
-      params.rangeMin,
-      params.rangeMax,
-      params.stakeAmount,
-      targetHash,
-    ],
+    args: [],
   });
   const contractAddress = deployed.deployTxData.public.contractAddress as string;
-  rememberHostGame({
-    contractAddress,
-    targetSaltHex: bytesToHex(params.targetSalt),
-    targetNumber: params.targetNumber.toString(),
-  });
-  await providers.privateStateProvider.set(privateStateIdFor(contractAddress), {
-    ...privateState,
-    targetSalt: params.targetSalt,
-    targetNumber: params.targetNumber,
-  });
-  return { deployed, contractAddress, targetHash };
+  return { deployed, contractAddress };
 }
 
-export async function connectToGame(
+/**
+ * Connect to an already-deployed Single Hub Contract.
+ */
+export async function connectToHub(
   providers: GameProviders,
   contractAddress: string,
   privateState: GamePrivateState,
@@ -106,21 +102,25 @@ export async function connectToGame(
   });
 }
 
-export type DeployedGame = Awaited<ReturnType<typeof connectToGame>>;
+export type DeployedHub = Awaited<ReturnType<typeof connectToHub>>;
+// Backwards compatibility alias
+export type DeployedGame = DeployedHub;
 
-export async function readGameState(
+export async function readRoomState(
   providers: GameProviders,
   contractAddress: string,
+  roomCode: string,
 ): Promise<GameState> {
   const generated = await loadGenerated();
   const publicStates = await getPublicStates(providers as never, contractAddress);
   const ledgerData = generated.ledger((publicStates as { contractState: { data: unknown } }).contractState.data as never);
-  return ledgerToGameState(ledgerData);
+  return ledgerToRoomState(ledgerData, roomCode, generated.pureCircuits);
 }
 
-export function subscribeGameState(
+export function subscribeRoomState(
   providers: GameProviders,
   contractAddress: string,
+  roomCode: string,
   onState: (state: GameState) => void,
   onError?: (err: Error) => void,
 ): () => void {
@@ -130,16 +130,16 @@ export function subscribeGameState(
   );
   if (!observable?.subscribe) {
     const timer = setInterval(() => {
-      readGameState(providers, contractAddress).then(onState).catch((e) => onError?.(e));
+      readRoomState(providers, contractAddress, roomCode).then(onState).catch((e) => onError?.(e));
     }, 4000);
-    void readGameState(providers, contractAddress).then(onState).catch((e) => onError?.(e));
+    void readRoomState(providers, contractAddress, roomCode).then(onState).catch((e) => onError?.(e));
     return () => clearInterval(timer);
   }
   const sub = observable.subscribe({
     next: async (contractState: { data?: unknown }) => {
       try {
         const generated = await loadGenerated();
-        onState(ledgerToGameState(generated.ledger((contractState as { data: unknown }).data as never)));
+        onState(ledgerToRoomState(generated.ledger((contractState as { data: unknown }).data as never), roomCode, generated.pureCircuits));
       } catch (e) {
         onError?.(e instanceof Error ? e : new Error(String(e)));
       }
@@ -149,38 +149,70 @@ export function subscribeGameState(
   return () => sub.unsubscribe?.();
 }
 
-export async function callFaucet(deployed: DeployedGame) {
+export async function callFaucet(deployed: DeployedHub) {
   return deployed.callTx.faucet();
 }
 
-export async function callJoinGame(deployed: DeployedGame) {
-  return deployed.callTx.joinGame();
+export async function callCreateRoom(deployed: DeployedHub, params: CreateRoomParams) {
+  const targetHash = computeTargetHash(params.targetNumber, params.targetSalt);
+  const roomId = codeToRoomId(params.roomCode);
+
+  rememberHostGame({
+    roomCode: params.roomCode,
+    targetSaltHex: bytesToHex(params.targetSalt),
+    targetNumber: params.targetNumber.toString(),
+  });
+
+  return deployed.callTx.createRoom(
+    roomId,
+    params.maxPlayers,
+    params.rangeMin,
+    params.rangeMax,
+    params.stakeAmount,
+    targetHash,
+  );
 }
 
-export async function callGuess(deployed: DeployedGame, number: bigint) {
-  return deployed.callTx.guess(number);
+export async function callJoinRoom(deployed: DeployedHub, roomCode: string) {
+  const roomId = codeToRoomId(roomCode);
+  return deployed.callTx.joinRoom(roomId);
+}
+
+export async function callGuess(deployed: DeployedHub, roomCode: string, number: bigint) {
+  const roomId = codeToRoomId(roomCode);
+  return deployed.callTx.guess(roomId, number);
 }
 
 export async function callDeclareWinner(
-  deployed: DeployedGame,
+  deployed: DeployedHub,
+  roomCode: string,
   playerBytesHex: string,
   targetNumber: bigint,
 ) {
-  const bytes = new Uint8Array(playerBytesHex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(playerBytesHex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return deployed.callTx.declareWinner({ bytes }, targetNumber);
+  const roomId = codeToRoomId(roomCode);
+  const bytes = hexToBytes(playerBytesHex);
+  return deployed.callTx.declareWinner(roomId, { bytes }, targetNumber);
 }
 
-export async function callGiveUp(deployed: DeployedGame) {
-  return deployed.callTx.giveUp();
+export async function callGiveUp(deployed: DeployedHub, roomCode: string) {
+  const roomId = codeToRoomId(roomCode);
+  return deployed.callTx.giveUp(roomId);
 }
 
-export async function callCancelGame(deployed: DeployedGame) {
-  return deployed.callTx.cancelGame();
+export async function callCancelRoom(deployed: DeployedHub, roomCode: string) {
+  const roomId = codeToRoomId(roomCode);
+  return deployed.callTx.cancelRoom(roomId);
 }
 
-export async function callClaimRefund(deployed: DeployedGame) {
-  return deployed.callTx.claimRefund();
+export async function callClaimRefund(deployed: DeployedHub, roomCode: string) {
+  const roomId = codeToRoomId(roomCode);
+  return deployed.callTx.claimRefund(roomId);
 }
+
+// Backwards compatibility wrappers
+export const connectToGame = connectToHub;
+export const readGameState = (providers: GameProviders, contractAddress: string) => readRoomState(providers, contractAddress, 'DEFAULT');
+export const subscribeGameState = (providers: GameProviders, contractAddress: string, onState: (s: GameState) => void, onError?: (e: Error) => void) =>
+  subscribeRoomState(providers, contractAddress, 'DEFAULT', onState, onError);
+export const callJoinGame = callJoinRoom;
+export const callCancelGame = callCancelRoom;

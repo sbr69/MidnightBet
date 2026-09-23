@@ -9,6 +9,7 @@
   },
   "scripts": {
     "prepare-deploy": "tsx src/deploy.ts",
+    "deploy:preview": "tsx src/deploy-preview.ts",
     "cli": "tsx src/cli.ts",
     "build": "tsc",
     "test": "vitest run"

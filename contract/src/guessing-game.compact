@@ -16,36 +16,32 @@ struct UserPublicKey { bytes: Bytes<32>; }
 // Public Ledger State
 // ----------------------------------------------------
 
-export ledger gamePhase: GamePhase;
-export ledger maxPlayers: Uint<8>;
-export ledger currentPlayerCount: Counter;
-export ledger rangeMin: Uint<64>;
-export ledger rangeMax: Uint<64>;
-export ledger stakeAmount: Uint<64>;
-export ledger totalPool: Uint<64>;
-export ledger targetHash: Bytes<32>;
-export ledger winner: UserPublicKey;
-export ledger creator: UserPublicKey;
-
-// Current round number (starts at 0, becomes 1 when game begins)
-export ledger currentRound: Counter;
-// Monotonic total-guesses-ever counter (used to detect when a round is complete)
-export ledger totalGuessCount: Counter;
-
-export ledger players: Map<UserPublicKey, Boolean>;
+// Global token balances
 export ledger balances: Map<UserPublicKey, Uint<64>>;
 
-// Tracks the round number each player last guessed in (Uint<32> = counter size)
-export ledger lastGuessedRound: Map<UserPublicKey, Uint<32>>;
+// Per-room metadata (keyed by roomId: Bytes<32>)
+export ledger roomPhase: Map<Bytes<32>, GamePhase>;
+export ledger roomCreator: Map<Bytes<32>, UserPublicKey>;
+export ledger roomMaxPlayers: Map<Bytes<32>, Uint<8>>;
+export ledger roomPlayerCount: Map<Bytes<32>, Uint<32>>;
+export ledger roomRangeMin: Map<Bytes<32>, Uint<64>>;
+export ledger roomRangeMax: Map<Bytes<32>, Uint<64>>;
+export ledger roomStakeAmount: Map<Bytes<32>, Uint<64>>;
+export ledger roomTotalPool: Map<Bytes<32>, Uint<64>>;
+export ledger roomTargetHash: Map<Bytes<32>, Bytes<32>>;
+export ledger roomWinner: Map<Bytes<32>, UserPublicKey>;
 
-// Stores the most recent guess per player (for winner verification)
-export ledger latestGuesses: Map<UserPublicKey, Uint<64>>;
+// Per-room round management
+export ledger roomCurrentRound: Map<Bytes<32>, Uint<32>>;
+export ledger roomRoundGuesses: Map<Bytes<32>, Uint<32>>;
+export ledger roomGiveUpCount: Map<Bytes<32>, Uint<32>>;
 
-export ledger hasGivenUp: Map<UserPublicKey, Boolean>;
-export ledger giveUpCount: Counter;
-
-// Snapshot: total guesses at the START of each round (to compute per-round count)
-export ledger roundStartGuessCount: Uint<32>;
+// Per-room per-player state (keyed by composite key: persistentHash([roomId, player.bytes]))
+export ledger roomPlayers: Map<Bytes<32>, Boolean>;
+export ledger roomPlayerAtIndex: Map<Bytes<32>, UserPublicKey>;
+export ledger roomLatestGuesses: Map<Bytes<32>, Uint<64>>;
+export ledger roomLastGuessedRound: Map<Bytes<32>, Uint<32>>;
+export ledger roomHasGivenUp: Map<Bytes<32>, Boolean>;
 
 // ----------------------------------------------------
 // Witnesses
@@ -67,6 +63,20 @@ export circuit deriveUserPublicKey(sk: UserSecretKey): UserPublicKey {
     };
 }
 
+export circuit roomPlayerKey(roomId: Bytes<32>, player: UserPublicKey): Bytes<32> {
+    return persistentHash<Vector<2, Bytes<32>>>([
+        roomId,
+        player.bytes
+    ]);
+}
+
+export circuit roomIndexKey(roomId: Bytes<32>, index: Uint<32>): Bytes<32> {
+    return persistentHash<Vector<2, Bytes<32>>>([
+        roomId,
+        persistentCommit<Uint<64>>(index as Uint<64>, pad(32, "midnightbet:idx:v1"))
+    ]);
+}
+
 export circuit getBalance(account: UserPublicKey): Uint<64> {
     if (!balances.member(disclose(account))) {
         return 0;
@@ -74,35 +84,12 @@ export circuit getBalance(account: UserPublicKey): Uint<64> {
     return balances.lookup(disclose(account));
 }
 
-// Returns the round in which a player last guessed (0 = never)
-export circuit getLastGuessedRound(account: UserPublicKey): Uint<32> {
-    if (!lastGuessedRound.member(disclose(account))) {
-        return 0;
-    }
-    return lastGuessedRound.lookup(disclose(account));
-}
-
 // ----------------------------------------------------
 // Circuits
 // ----------------------------------------------------
 
-constructor(
-    _maxPlayers: Uint<8>,
-    _rangeMin: Uint<64>,
-    _rangeMax: Uint<64>,
-    _stakeAmount: Uint<64>,
-    _targetHash: Bytes<32>
-) {
-    const caller = disclose(deriveUserPublicKey(getUserSecret()));
-    creator = caller;
-    maxPlayers = disclose(_maxPlayers);
-    rangeMin = disclose(_rangeMin);
-    rangeMax = disclose(_rangeMax);
-    stakeAmount = disclose(_stakeAmount);
-    targetHash = disclose(_targetHash);
-    gamePhase = GamePhase.WaitingForPlayers;
-    totalPool = 0;
-    roundStartGuessCount = 0;
+constructor() {
+    // Single Hub contract deployed once; no parameters required
 }
 
 // Internal token faucet for testing
@@ -112,114 +99,176 @@ export circuit faucet(): [] {
     balances.insert(caller, disclose((bal + 1000) as Uint<64>));
 }
 
-export circuit joinGame(): [] {
-    assert(gamePhase == GamePhase.WaitingForPlayers, "Game not accepting players");
+export circuit createRoom(
+    roomId: Bytes<32>,
+    maxPlayers: Uint<8>,
+    rangeMin: Uint<64>,
+    rangeMax: Uint<64>,
+    stakeAmount: Uint<64>,
+    targetHash: Bytes<32>
+): [] {
+    const dRoom = disclose(roomId);
+    assert(!roomPhase.member(dRoom), "Room already exists");
+    assert(disclose(maxPlayers) >= 2, "Need at least 2 players");
+    assert(disclose(rangeMax) > disclose(rangeMin), "Invalid range");
 
     const caller = disclose(deriveUserPublicKey(getUserSecret()));
-    assert(!players.member(caller) || players.lookup(caller) == false, "Already joined");
 
+    roomCreator.insert(dRoom, caller);
+    roomMaxPlayers.insert(dRoom, disclose(maxPlayers));
+    roomRangeMin.insert(dRoom, disclose(rangeMin));
+    roomRangeMax.insert(dRoom, disclose(rangeMax));
+    roomStakeAmount.insert(dRoom, disclose(stakeAmount));
+    roomTargetHash.insert(dRoom, disclose(targetHash));
+
+    roomPhase.insert(dRoom, GamePhase.WaitingForPlayers);
+    roomPlayerCount.insert(dRoom, 0);
+    roomTotalPool.insert(dRoom, 0);
+    roomCurrentRound.insert(dRoom, 0);
+    roomRoundGuesses.insert(dRoom, 0);
+    roomGiveUpCount.insert(dRoom, 0);
+}
+
+export circuit joinRoom(roomId: Bytes<32>): [] {
+    const dRoom = disclose(roomId);
+    assert(roomPhase.member(dRoom), "Room does not exist");
+    assert(roomPhase.lookup(dRoom) == GamePhase.WaitingForPlayers, "Room not accepting players");
+
+    const caller = disclose(deriveUserPublicKey(getUserSecret()));
+    const pKey = roomPlayerKey(dRoom, caller);
+
+    assert(!roomPlayers.member(pKey) || roomPlayers.lookup(pKey) == false, "Already joined this room");
+
+    const stake = roomStakeAmount.lookup(dRoom);
     const bal = getBalance(caller);
-    assert(bal >= stakeAmount, "Insufficient balance for stake");
+    assert(bal >= stake, "Insufficient balance for stake");
 
-    balances.insert(caller, disclose((bal - stakeAmount) as Uint<64>));
-    players.insert(caller, true);
-    currentPlayerCount.increment(1);
-    totalPool = (totalPool + stakeAmount) as Uint<64>;
+    balances.insert(caller, disclose((bal - stake) as Uint<64>));
+    roomPlayers.insert(pKey, true);
 
-    if (currentPlayerCount.read() == (maxPlayers as Uint<32>)) {
-        gamePhase = GamePhase.InProgress;
-        currentRound.increment(1);  // Round 1 begins
-        roundStartGuessCount = 0;
+    const prevCount = roomPlayerCount.lookup(dRoom);
+    roomPlayerAtIndex.insert(roomIndexKey(dRoom, prevCount), caller);
+    const newCount = (prevCount + 1) as Uint<32>;
+    roomPlayerCount.insert(dRoom, disclose(newCount));
+
+    const prevPool = roomTotalPool.lookup(dRoom);
+    roomTotalPool.insert(dRoom, disclose((prevPool + stake) as Uint<64>));
+
+    const maxP = roomMaxPlayers.lookup(dRoom) as Uint<32>;
+    if (newCount == maxP) {
+        roomPhase.insert(dRoom, GamePhase.InProgress);
+        roomCurrentRound.insert(dRoom, 1);
+        roomRoundGuesses.insert(dRoom, 0);
     }
 }
 
-// Round-based guess: each player may guess once per round.
-// A new round opens automatically once all active players have guessed.
-export circuit guess(number: Uint<64>): [] {
-    assert(gamePhase == GamePhase.InProgress, "Game not in progress");
-    // number is the user's private guess; range check discloses only pass/fail
-    assert(disclose(number) >= rangeMin && disclose(number) <= rangeMax, "Guess out of range");
+export circuit guess(roomId: Bytes<32>, number: Uint<64>): [] {
+    const dRoom = disclose(roomId);
+    assert(roomPhase.member(dRoom), "Room does not exist");
+    assert(roomPhase.lookup(dRoom) == GamePhase.InProgress, "Room not in progress");
+
+    const rMin = roomRangeMin.lookup(dRoom);
+    const rMax = roomRangeMax.lookup(dRoom);
+    const dNumber = disclose(number);
+    assert(dNumber >= rMin && dNumber <= rMax, "Guess out of range");
 
     const caller = disclose(deriveUserPublicKey(getUserSecret()));
-    assert(players.member(caller) && players.lookup(caller) == true, "Not an active player");
-    assert(!hasGivenUp.member(caller) || hasGivenUp.lookup(caller) == false, "Player has given up");
+    const pKey = roomPlayerKey(dRoom, caller);
 
-    // Block double-guessing within the same round
-    const thisRound = currentRound.read() as Uint<32>;
-    const myLastRound = getLastGuessedRound(caller);
-    assert(myLastRound < thisRound, "Already guessed this round — wait for others");
+    assert(roomPlayers.member(pKey) && roomPlayers.lookup(pKey) == true, "Not an active player");
+    assert(!roomHasGivenUp.member(pKey) || roomHasGivenUp.lookup(pKey) == false, "Player has given up");
 
-    // Record guess and mark as guessed this round
-    latestGuesses.insert(caller, disclose(number));
-    lastGuessedRound.insert(caller, disclose(thisRound));
-    totalGuessCount.increment(1);
+    const currentR = roomCurrentRound.lookup(dRoom);
+    if (roomLastGuessedRound.member(pKey)) {
+        assert(roomLastGuessedRound.lookup(pKey) < currentR, "Already guessed this round — wait for others");
+    }
 
-    // How many have guessed this round = totalGuessCount - roundStartGuessCount
-    const guessedThisRound = (totalGuessCount.read() as Uint<32>) - roundStartGuessCount;
-    // Active players = all joined minus those who gave up
-    const activePlayers = (currentPlayerCount.read() as Uint<32>) - (giveUpCount.read() as Uint<32>);
+    roomLatestGuesses.insert(pKey, dNumber);
+    roomLastGuessedRound.insert(pKey, currentR);
 
-    if (guessedThisRound == activePlayers) {
-        // All players have guessed — advance to next round
-        currentRound.increment(1);
-        roundStartGuessCount = totalGuessCount.read() as Uint<32>;
+    const prevGuesses = roomRoundGuesses.lookup(dRoom);
+    const newGuesses = (prevGuesses + 1) as Uint<32>;
+    roomRoundGuesses.insert(dRoom, disclose(newGuesses));
+
+    const activePlayers = roomPlayerCount.lookup(dRoom) - roomGiveUpCount.lookup(dRoom);
+    if (newGuesses == activePlayers) {
+        roomCurrentRound.insert(dRoom, (currentR + 1) as Uint<32>);
+        roomRoundGuesses.insert(dRoom, 0);
     }
 }
 
-// Creator reveals the true target to declare a winner.
-// The ZK circuit verifies the commitment (hash) and checks a player's stored guess.
-export circuit declareWinner(player: UserPublicKey, targetNumber: Uint<64>): [] {
-    const caller = disclose(deriveUserPublicKey(getUserSecret()));
-    assert(caller == creator, "Only creator can declare winner");
-    assert(gamePhase == GamePhase.InProgress, "Game not in progress");
+export circuit declareWinner(roomId: Bytes<32>, player: UserPublicKey, targetNumber: Uint<64>): [] {
+    const dRoom = disclose(roomId);
+    assert(roomPhase.member(dRoom), "Room does not exist");
+    assert(roomPhase.lookup(dRoom) == GamePhase.InProgress, "Room not in progress");
 
-    // Verify the revealed target matches the on-chain commitment
+    const caller = disclose(deriveUserPublicKey(getUserSecret()));
+    assert(caller == roomCreator.lookup(dRoom), "Only creator can declare winner");
+
     const salt = getTargetSalt();
-    assert(targetHash == persistentCommit(targetNumber, salt), "Target hash mismatch");
+    const dTarget = disclose(targetNumber);
+    assert(roomTargetHash.lookup(dRoom) == persistentCommit<Uint<64>>(targetNumber, salt), "Target hash mismatch");
 
-    const disclosedPlayer = disclose(player);
+    const dPlayer = disclose(player);
+    const pKey = roomPlayerKey(dRoom, dPlayer);
 
-    // Verify the player's stored guess equals the target
-    assert(latestGuesses.member(disclosedPlayer), "Player has no recorded guess");
-    const pGuess = latestGuesses.lookup(disclosedPlayer);
-    assert(pGuess == disclose(targetNumber), "Player's guess does not match target");
+    assert(roomLatestGuesses.member(pKey), "Player has no recorded guess");
+    assert(roomLatestGuesses.lookup(pKey) == dTarget, "Player's guess does not match target");
 
-    // Award the pool to the winner
-    gamePhase = GamePhase.Finished;
-    winner = disclosedPlayer;
-    const winnerBal = getBalance(disclosedPlayer);
-    balances.insert(disclosedPlayer, disclose((winnerBal + totalPool) as Uint<64>));
+    roomPhase.insert(dRoom, GamePhase.Finished);
+    roomWinner.insert(dRoom, dPlayer);
+
+    const pool = roomTotalPool.lookup(dRoom);
+    const winnerBal = getBalance(dPlayer);
+    balances.insert(dPlayer, disclose((winnerBal + pool) as Uint<64>));
 }
 
-export circuit giveUp(): [] {
-    assert(gamePhase == GamePhase.InProgress, "Game not in progress");
+export circuit giveUp(roomId: Bytes<32>): [] {
+    const dRoom = disclose(roomId);
+    assert(roomPhase.member(dRoom), "Room does not exist");
+    assert(roomPhase.lookup(dRoom) == GamePhase.InProgress, "Room not in progress");
 
     const caller = disclose(deriveUserPublicKey(getUserSecret()));
-    assert(players.member(caller) && players.lookup(caller) == true, "Not an active player");
-    assert(!hasGivenUp.member(caller) || hasGivenUp.lookup(caller) == false, "Already gave up");
+    const pKey = roomPlayerKey(dRoom, caller);
 
-    hasGivenUp.insert(caller, true);
-    giveUpCount.increment(1);
+    assert(roomPlayers.member(pKey) && roomPlayers.lookup(pKey) == true, "Not an active player");
+    assert(!roomHasGivenUp.member(pKey) || roomHasGivenUp.lookup(pKey) == false, "Already gave up");
 
-    if (giveUpCount.read() == (currentPlayerCount.read() as Uint<32>)) {
-        gamePhase = GamePhase.Cancelled;
+    roomHasGivenUp.insert(pKey, true);
+
+    const prevGiveUps = roomGiveUpCount.lookup(dRoom);
+    const newGiveUps = (prevGiveUps + 1) as Uint<32>;
+    roomGiveUpCount.insert(dRoom, disclose(newGiveUps));
+
+    if (newGiveUps == roomPlayerCount.lookup(dRoom)) {
+        roomPhase.insert(dRoom, GamePhase.Cancelled);
     }
 }
 
-export circuit cancelGame(): [] {
+export circuit cancelRoom(roomId: Bytes<32>): [] {
+    const dRoom = disclose(roomId);
+    assert(roomPhase.member(dRoom), "Room does not exist");
+    assert(roomPhase.lookup(dRoom) == GamePhase.WaitingForPlayers, "Cannot cancel active room");
+
     const caller = disclose(deriveUserPublicKey(getUserSecret()));
-    assert(caller == creator, "Only creator can cancel");
-    assert(gamePhase == GamePhase.WaitingForPlayers, "Cannot cancel an active game");
-    gamePhase = GamePhase.Cancelled;
+    assert(caller == roomCreator.lookup(dRoom), "Only creator can cancel");
+
+    roomPhase.insert(dRoom, GamePhase.Cancelled);
 }
 
-export circuit claimRefund(): [] {
-    assert(gamePhase == GamePhase.Cancelled, "Game not cancelled");
+export circuit claimRefund(roomId: Bytes<32>): [] {
+    const dRoom = disclose(roomId);
+    assert(roomPhase.member(dRoom), "Room does not exist");
+    assert(roomPhase.lookup(dRoom) == GamePhase.Cancelled, "Room not cancelled");
 
     const caller = disclose(deriveUserPublicKey(getUserSecret()));
-    assert(players.member(caller) && players.lookup(caller) == true, "Not eligible for refund");
+    const pKey = roomPlayerKey(dRoom, caller);
 
-    players.insert(caller, false);  // Mark refunded
+    assert(roomPlayers.member(pKey) && roomPlayers.lookup(pKey) == true, "Not eligible for refund");
+
+    roomPlayers.insert(pKey, false); // Mark refunded
+
+    const stake = roomStakeAmount.lookup(dRoom);
     const bal = getBalance(caller);
-    balances.insert(caller, disclose((bal + stakeAmount) as Uint<64>));
+    balances.insert(caller, disclose((bal + stake) as Uint<64>));
 }

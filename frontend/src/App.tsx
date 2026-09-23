@@ -3,20 +3,46 @@ import { Home } from './components/Home';
 import { CreateGame } from './components/CreateGame';
 import { GameArena } from './components/GameArena';
 import { JoinGame } from './components/JoinGame';
+import { AdminDeploy } from './components/AdminDeploy';
 import { WalletModal } from './components/WalletModal';
-import { formatError, useMidnight } from './MidnightContext';
+import { useMidnight } from './useMidnight';
+import { formatError } from './error-utils';
 import { decodeInviteLink } from 'midnightbet-dapp';
 
-export type ViewState = 'home' | 'create' | 'join' | 'arena';
+export type ViewState = 'home' | 'create' | 'join' | 'arena' | 'admin-deploy';
 
 function App() {
-  const [currentView, setCurrentView] = useState<ViewState>('home');
+  const [currentView, setCurrentView] = useState<ViewState>(() => {
+    if (typeof window !== 'undefined' && (window.location.hash === '#/admin-deploy' || window.location.hash === '#/deploy')) {
+      return 'admin-deploy';
+    }
+    return 'home';
+  });
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
-  const { isConnected, isConnecting, walletAddress, walletName, networkId, error } = useMidnight();
+  const {
+    isConnected,
+    isConnecting,
+    walletAddress,
+    walletName,
+    networkId,
+    contractAddress,
+    error,
+  } = useMidnight();
 
   useEffect(() => {
-    if (decodeInviteLink()) {
-      setCurrentView(isConnected ? 'join' : 'home');
+    const handleHash = () => {
+      if (window.location.hash === '#/admin-deploy' || window.location.hash === '#/deploy') {
+        setCurrentView('admin-deploy');
+      }
+    };
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  useEffect(() => {
+    const invite = decodeInviteLink();
+    if (invite.roomCode) {
+      setCurrentView('join');
     }
   }, [isConnected]);
 
@@ -43,6 +69,13 @@ function App() {
         </div>
 
         <div className="flex items-center gap-3">
+          {contractAddress && (
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono bg-slate-100 text-slate-600 border border-slate-200" title={contractAddress}>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              Hub: {contractAddress.slice(0, 6)}…{contractAddress.slice(-4)}
+            </div>
+          )}
+
           <div className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
             Preview Net
           </div>
@@ -81,6 +114,7 @@ function App() {
         {currentView === 'create' && <CreateGame onNavigate={setCurrentView} walletConnected={isConnected} />}
         {currentView === 'join' && <JoinGame onNavigate={setCurrentView} walletConnected={isConnected} />}
         {currentView === 'arena' && <GameArena onNavigate={setCurrentView} walletConnected={isConnected} />}
+        {currentView === 'admin-deploy' && <AdminDeploy onNavigate={setCurrentView} />}
       </main>
 
       <footer className="p-6 text-center text-slate-500 text-sm font-medium">

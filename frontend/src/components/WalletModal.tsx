@@ -1,4 +1,4 @@
-import { useMidnight } from '../MidnightContext';
+import { useMidnight } from '../useMidnight';
 
 interface WalletModalProps {
   isOpen: boolean;

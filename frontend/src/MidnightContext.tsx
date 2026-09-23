@@ -1,43 +1,23 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   applyNetworkId,
   buildBrowserProviders,
   connectMidnightWallet,
-  connectToGame,
+  connectToHub,
   decodeInviteLink,
+  deployHub,
   getAvailableWallets,
   loadOrCreateSecretKey,
   NETWORK_CONFIG,
   privateStateFor,
-  type DeployedGame,
-  type GamePrivateState,
+  type DeployedHub,
   type GameProviders,
   type GameState,
   type WalletInfo,
 } from 'midnightbet-dapp';
+import { MidnightContext } from './midnight-context';
 
-interface MidnightContextType {
-  isConnecting: boolean;
-  isConnected: boolean;
-  error: string | null;
-  walletAddress: string | null;
-  walletName: string | null;
-  availableWallets: WalletInfo[];
-  networkId: string;
-  providers: GameProviders | null;
-  privateState: GamePrivateState;
-  contractAddress: string | null;
-  deployed: DeployedGame | null;
-  gameState: GameState | null;
-  connect: (walletId?: string) => Promise<void>;
-  attachGame: (address: string) => Promise<DeployedGame>;
-  setContractAddress: (address: string | null) => void;
-  setDeployed: (d: DeployedGame | null) => void;
-  setGameState: (s: GameState | null) => void;
-  clearError: () => void;
-}
-
-const MidnightContext = createContext<MidnightContextType | undefined>(undefined);
+const CENTRAL_CONTRACT_KEY = 'midnightbet:centralContract';
 
 export function MidnightProvider({ children }: { children: ReactNode }) {
   const [isConnecting, setIsConnecting] = useState(false);
@@ -48,10 +28,28 @@ export function MidnightProvider({ children }: { children: ReactNode }) {
   const [availableWallets, setAvailableWallets] = useState<WalletInfo[]>([]);
   const [activeNetwork, setActiveNetwork] = useState<string>(String(NETWORK_CONFIG.networkId));
   const [providers, setProviders] = useState<GameProviders | null>(null);
-  const [contractAddress, setContractAddress] = useState<string | null>(() => decodeInviteLink());
-  const [deployed, setDeployed] = useState<DeployedGame | null>(null);
+
+  const initialInvite = useMemo(() => decodeInviteLink(), []);
+  const [contractAddress, setContractAddressState] = useState<string | null>(() => {
+    if (initialInvite.contractAddress) return initialInvite.contractAddress;
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem(CENTRAL_CONTRACT_KEY) || (import.meta as any).env?.VITE_CONTRACT_ADDRESS || null;
+    }
+    return null;
+  });
+
+  const [activeRoomCode, setActiveRoomCode] = useState<string | null>(() => initialInvite.roomCode);
+  const [deployed, setDeployed] = useState<DeployedHub | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
-  const privateState = useMemo(() => privateStateFor(contractAddress ?? undefined), [contractAddress]);
+  const privateState = useMemo(() => privateStateFor(activeRoomCode ?? contractAddress ?? undefined), [activeRoomCode, contractAddress]);
+
+  const setContractAddress = useCallback((addr: string | null) => {
+    setContractAddressState(addr);
+    if (typeof localStorage !== 'undefined') {
+      if (addr) localStorage.setItem(CENTRAL_CONTRACT_KEY, addr);
+      else localStorage.removeItem(CENTRAL_CONTRACT_KEY);
+    }
+  }, []);
 
   // Scan for available wallets on load and window focus
   useEffect(() => {
@@ -67,6 +65,28 @@ export function MidnightProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', scan);
     };
   }, []);
+
+  // Auto-connect to hub when providers and contractAddress are ready
+  useEffect(() => {
+    if (!providers || !contractAddress) return;
+    let cancelled = false;
+
+    connectToHub(providers, contractAddress, privateState)
+      .then((instance) => {
+        if (!cancelled) {
+          setDeployed(instance);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.warn('Failed connecting to hub contract', err);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [providers, contractAddress, privateState]);
 
   const connect = useCallback(async (walletId?: string) => {
     setIsConnecting(true);
@@ -94,18 +114,15 @@ export function MidnightProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const attachGame = useCallback(
-    async (address: string) => {
-      if (!providers) {
-        throw new Error('Connect your Midnight wallet (1AM or Lace) first');
-      }
-      setContractAddress(address);
-      const found = await connectToGame(providers, address, privateStateFor(address));
-      setDeployed(found);
-      return found;
-    },
-    [providers],
-  );
+  const deployCentralHub = useCallback(async () => {
+    if (!providers) {
+      throw new Error('Connect your Midnight wallet first');
+    }
+    const { deployed: newDeployed, contractAddress: newAddress } = await deployHub(providers, privateState);
+    setDeployed(newDeployed);
+    setContractAddress(newAddress);
+    return newAddress;
+  }, [providers, privateState, setContractAddress]);
 
   return (
     <MidnightContext.Provider
@@ -120,11 +137,13 @@ export function MidnightProvider({ children }: { children: ReactNode }) {
         providers,
         privateState,
         contractAddress,
+        activeRoomCode,
         deployed,
         gameState,
         connect,
-        attachGame,
+        deployCentralHub,
         setContractAddress,
+        setActiveRoomCode,
         setDeployed,
         setGameState,
         clearError: () => setError(null),
@@ -135,27 +154,4 @@ export function MidnightProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useMidnight() {
-  const context = useContext(MidnightContext);
-  if (!context) {
-    throw new Error('useMidnight must be used within a MidnightProvider');
-  }
-  return context;
-}
 
-export function formatError(err: unknown): string {
-  const message = err instanceof Error ? err.message : String(err);
-  if (/wallet not found|lace|1am/i.test(message)) {
-    return 'No Midnight wallet detected. Please install 1AM Wallet (1am.xyz) or Lace (lace.io).';
-  }
-  if (/dust|fee|balance/i.test(message)) {
-    return 'Insufficient DUST or tNIGHT on Midnight Preview. Request testnet tokens from the faucet.';
-  }
-  if (/Compact output missing|compile/i.test(message)) {
-    return 'Contract not compiled. Compact compilation artifacts are required.';
-  }
-  if (/fetch failed|proof-server|6300|connection refused|Failed to fetch/i.test(message)) {
-    return 'Could not reach ZK proof server (port 6300). Lace requires a local Docker proof server, or use 1AM Wallet which includes automatic remote ZK proving.';
-  }
-  return message;
-}

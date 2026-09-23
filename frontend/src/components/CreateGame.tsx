@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import type { ViewState } from '../App';
-import { formatError, useMidnight } from '../MidnightContext';
+import { useMidnight } from '../useMidnight';
+import { formatError } from '../error-utils';
 import {
-  callFaucet,
-  callJoinGame,
-  deployGame,
+  callCreateRoom,
+  callJoinRoom,
   encodeInviteLink,
+  generateRoomCode,
   generateTargetNumber,
   loadOrCreateSecretKey,
 } from 'midnightbet-dapp';
@@ -21,48 +22,45 @@ export function CreateGame({ onNavigate, walletConnected }: CreateGameProps) {
   const [maxRange, setMaxRange] = useState(100);
   const [stake, setStake] = useState(10);
   const [isCreating, setIsCreating] = useState(false);
+  const [roomCode, setRoomCode] = useState<string | null>(null);
   const [invite, setInvite] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { providers, setContractAddress, setDeployed } = useMidnight();
+
+  const { providers, deployed, setActiveRoomCode } = useMidnight();
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsCreating(true);
     setError(null);
     try {
-      if (!walletConnected) throw new Error('Wallet not connected');
-      if (!providers) throw new Error('Midnight providers are not initialized');
+      if (!walletConnected) throw new Error('Please connect your Midnight wallet first.');
+      if (!providers) throw new Error('Midnight wallet providers are not initialized.');
+      if (!deployed) throw new Error('Connecting to Midnight game contract… please ensure your wallet is connected.');
 
-      const secretKey = loadOrCreateSecretKey();
+      loadOrCreateSecretKey();
+      const code = generateRoomCode();
       const targetNumber = generateTargetNumber(BigInt(minRange), BigInt(maxRange));
       const targetSalt = crypto.getRandomValues(new Uint8Array(32));
 
-      const { deployed, contractAddress } = await deployGame(
-        providers,
-        { secretKey, targetSalt, targetNumber },
-        {
-          maxPlayers: BigInt(players),
-          rangeMin: BigInt(minRange),
-          rangeMax: BigInt(maxRange),
-          stakeAmount: BigInt(stake),
-          targetNumber,
-          targetSalt,
-        },
-      );
-
-      setContractAddress(contractAddress);
-      setDeployed(deployed);
-      setInvite(encodeInviteLink(contractAddress));
+      await callCreateRoom(deployed, {
+        roomCode: code,
+        maxPlayers: BigInt(players),
+        rangeMin: BigInt(minRange),
+        rangeMax: BigInt(maxRange),
+        stakeAmount: BigInt(stake),
+        targetNumber,
+        targetSalt,
+      });
 
       try {
-        await callFaucet(deployed);
-        await callJoinGame(deployed);
+        await callJoinRoom(deployed, code);
       } catch (joinErr) {
-        console.warn('faucet/join after deploy failed', joinErr);
-        setError(
-          `Game deployed but faucet/join failed: ${formatError(joinErr)}. You can still enter the arena.`,
-        );
+        console.warn('auto-join on new room failed (non-fatal)', joinErr);
       }
+
+      setRoomCode(code);
+      setActiveRoomCode(code);
+      setInvite(encodeInviteLink(code));
     } catch (err) {
       console.error(err);
       setError(formatError(err));
@@ -79,22 +77,38 @@ export function CreateGame({ onNavigate, walletConnected }: CreateGameProps) {
           onClick={() => onNavigate('home')}
           className="text-slate-500 hover:text-primary flex items-center gap-2 font-medium transition-colors"
         >
-          Back
+          ← Back
         </button>
       </div>
 
       <div className="glass-card">
-        <h2 className="text-2xl font-heading font-bold text-slate-800 mb-2">Game Settings</h2>
-        <p className="text-slate-500 text-sm mb-6">Configure the rules. The secret target is committed on-chain.</p>
+        <h2 className="text-2xl font-heading font-bold text-slate-800 mb-2">Create Room</h2>
+        <p className="text-slate-500 text-sm mb-6">
+          Set up a secret number guessing room. Challenge your friends to guess and win the pot!
+        </p>
 
         {error && (
           <p className="mb-4 text-sm text-rose-600 bg-rose-50 border border-rose-100 rounded-lg p-3">{error}</p>
         )}
 
-        {invite ? (
-          <div className="space-y-4">
-            <p className="text-sm text-slate-600">Share this invite. The target stays private in this browser.</p>
-            <input readOnly value={invite} className="input-field font-mono text-xs" />
+        {roomCode && invite ? (
+          <div className="space-y-6 text-center py-4">
+            <div>
+              <span className="text-xs uppercase font-bold tracking-wider text-slate-400">Room Code</span>
+              <div className="text-4xl font-mono font-black text-primary tracking-widest mt-1">
+                {roomCode}
+              </div>
+            </div>
+
+            <div className="text-left space-y-2">
+              <label className="text-xs font-semibold text-slate-600">Shareable Invite Link</label>
+              <input readOnly value={invite} className="input-field font-mono text-xs" />
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Your secret number is committed on-chain with Zero Knowledge. Share this code with your friends to join!
+            </p>
+
             <button type="button" className="btn-primary w-full" onClick={() => onNavigate('arena')}>
               Enter Arena
             </button>
@@ -143,7 +157,7 @@ export function CreateGame({ onNavigate, walletConnected }: CreateGameProps) {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">Stake Amount (in-contract tokens)</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">Stake Amount (tNIGHT tokens)</label>
               <input
                 type="number"
                 min="1"
@@ -158,7 +172,7 @@ export function CreateGame({ onNavigate, walletConnected }: CreateGameProps) {
               disabled={isCreating}
               className={`btn-primary w-full ${isCreating ? 'opacity-70 cursor-wait' : ''}`}
             >
-              {isCreating ? 'Deploying ZK contract…' : 'Create Game & Deploy'}
+              {isCreating ? 'Generating 6-char Room & Proving in ZK…' : 'Create Room'}
             </button>
           </form>
         )}

@@ -5,8 +5,61 @@ import { fileURLToPath } from 'node:url';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
+import fs from 'node:fs';
+
+const saveDeploymentPlugin = () => ({
+  name: 'save-deployment-plugin',
+  configureServer(server: any) {
+    server.middlewares.use('/api/save-deployment', (req: any, res: any) => {
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', (chunk: any) => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { contractAddress, txHash } = JSON.parse(body);
+            if (contractAddress) {
+              const envPath = path.resolve(dir, '.env');
+              let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
+              if (envContent.includes('VITE_CONTRACT_ADDRESS=')) {
+                envContent = envContent.replace(/VITE_CONTRACT_ADDRESS=.*/, `VITE_CONTRACT_ADDRESS="${contractAddress}"`);
+              } else {
+                envContent += `\nVITE_CONTRACT_ADDRESS="${contractAddress}"\n`;
+              }
+              fs.writeFileSync(envPath, envContent);
+
+              const deployJsonPath = path.resolve(dir, '../deployment.json');
+              fs.writeFileSync(
+                deployJsonPath,
+                JSON.stringify(
+                  {
+                    contractAddress,
+                    deploymentTxHash: txHash,
+                    network: 'preview',
+                    timestamp: new Date().toISOString(),
+                  },
+                  null,
+                  2
+                )
+              );
+              console.log('✓ [Vite] Saved VITE_CONTRACT_ADDRESS to frontend/.env and deployment.json:', contractAddress);
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: e.message }));
+          }
+        });
+      } else {
+        res.writeHead(405);
+        res.end();
+      }
+    });
+  },
+});
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), saveDeploymentPlugin()],
   define: {
     global: 'globalThis',
   },
@@ -54,6 +107,14 @@ export default defineConfig({
         find: 'midnightbet-dapp',
         replacement: path.resolve(dir, '../dapp/src/index.ts'),
       },
+      {
+        find: 'assert',
+        replacement: path.resolve(dir, 'src/shims/assert.ts'),
+      },
+      {
+        find: 'isomorphic-ws',
+        replacement: path.resolve(dir, 'src/shims/isomorphic-ws.ts'),
+      },
     ],
   },
   optimizeDeps: {
@@ -65,9 +126,11 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
+    chunkSizeWarningLimit: 1000,
   },
   server: {
     port: 3000,
+    strictPort: true,
     host: true,
     fs: { allow: [path.resolve(dir, '..')] },
     proxy: {
@@ -76,6 +139,7 @@ export default defineConfig({
   },
   preview: {
     port: 3000,
+    strictPort: true,
     host: true,
   },
 });

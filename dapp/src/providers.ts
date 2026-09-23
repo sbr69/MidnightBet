@@ -15,11 +15,12 @@ import type { GamePrivateState } from './private-state.js';
 
 export const GAME_CIRCUITS = [
   'faucet',
-  'joinGame',
+  'createRoom',
+  'joinRoom',
   'guess',
   'declareWinner',
   'giveUp',
-  'cancelGame',
+  'cancelRoom',
   'claimRefund',
 ] as const;
 
@@ -31,7 +32,7 @@ export const NETWORK_CONFIG = {
   indexerUri: 'https://indexer.preview.midnight.network/api/v4/graphql',
   indexerWsUri: 'wss://indexer.preview.midnight.network/api/v4/graphql/ws',
   nodeUri: 'https://rpc.preview.midnight.network',
-  proofServerUri: 'http://localhost:6300',
+  proofServerUri: 'https://proof.preview.midnight.network',
   networkId: 'preview' as NetworkId | string,
 };
 
